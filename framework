@@ -1,0 +1,641 @@
+*** these sets must be defined by the user.
+fmod PARAMETER-SORTS is   
+  sorts Action Cognition BasicInfo Perception InterfaceId .
+endfm
+
+--- ACTIONS
+fmod ACTION is  including PARAMETER-SORTS .
+  sort DefAction .  --- actions plus "noAction"
+  subsort Action < DefAction .
+  op noAction : -> DefAction [ctor] .
+endfm  
+
+--- ASSESSMENT
+fmod ASSESSMENT is
+  including ACTION .
+  sort Assessment .
+  ops noAssessment automatic attention novelty danger anger decision :
+  -> Assessment [ctor] . 
+  op assess : DefAction Perception -> Assessment .    
+endfm  
+
+
+--- -----------------------------------------------------
+
+*** WORKING MEMORY
+fmod WORKING-MEMORY is
+  including ACTION . protecting NAT .
+
+  var INTERFACE : InterfaceId .
+  var INFO-SET : InfoSet .
+  var MEMORY : Memory .
+  var INFO : Information .
+
+  sorts Goal Information .
+  subsorts Cognition Goal BasicInfo < Information .
+
+  op goal : Action -> Goal [ctor] . 
+
+  sort InfoSet .
+  subsort Information < InfoSet .
+  op noInfo : -> Information [ctor] .      
+  op __ : InfoSet InfoSet -> InfoSet [ctor assoc comm id: noInfo] .
+
+  sort Memory .
+  op noMemory : -> Memory [ctor] .
+  op _|->_ : InterfaceId InfoSet -> Memory [ctor] .
+  op _;_ : Memory Memory -> Memory [ctor assoc comm id: noMemory] . 
+
+  op card : Memory -> Nat .
+  eq card(noMemory) = 0 .
+  eq card((INTERFACE |-> INFO-SET) ; MEMORY) = card(INFO-SET) + card(MEMORY) .
+
+  op card : InfoSet -> Nat .    
+  eq card(noInfo) = 0 .
+  ceq card(INFO INFO-SET) = 1 + card(delete(INFO, INFO-SET)) if INFO =/= noInfo . 
+
+  op delete : Information InfoSet -> InfoSet .
+  eq delete(INFO, INFO  INFO-SET) = delete(INFO, INFO-SET) .
+  eq delete(INFO, INFO-SET) = INFO-SET [owise] .
+endfm
+
+
+
+
+load real-time-maude
+
+--- -----------------------------------------------------
+--- -----------------------------------------------------
+
+*** INTERFACE describes the device side
+
+(tmod INTERFACE is
+  including ACTION .
+  including TIME-INF .
+
+  sorts InterfaceState Perception ExpPerception .
+  subsort Perception < ExpPerception < InterfaceState .
+  op _for`time_ : Perception TimeInf -> InterfaceState [ctor right id: INF] .
+  op expired : Perception -> ExpPerception [ctor] .
+
+  sorts InterfaceTransition InterfaceTransitions .
+  subsort InterfaceTransition < InterfaceTransitions .
+
+  --- single transition:
+  op _--_-->_ : Perception DefAction InterfaceState -> InterfaceTransition [ctor] .
+  --- sets of transitions:
+  op noTransition : -> InterfaceTransitions [ctor] .
+  op _;_ : InterfaceTransitions InterfaceTransitions -> InterfaceTransitions [ctor assoc comm id: noTransition] . 
+endtm)
+
+
+*** Make time domain explicit.  Discrete time should be enough:
+
+(tmod TIME-DOMAIN is
+  including NAT-TIME-DOMAIN-WITH-INF .
+endtm)  
+
+
+--- ------------------------------------------------------------
+--- ------------------------------------------------------------
+
+*** TASK describes the human side
+
+(tomod TASK is   
+  including WORKING-MEMORY .
+  including TIME-DOMAIN .
+  including RAT .            --- difficulty is a value d s.t. 0 < d <= 1
+
+  class Task | subtasks : Task, 
+	       waitTime : Time,
+	       cognitiveLoad : Rat,    
+	       criticalityLevel : PosRat,  
+               status : TaskStatus .       
+
+  sort TaskStatus .
+  ops notStarted ongoing abandoned completed : -> TaskStatus [ctor] .
+
+  sorts BasicTask Subtask Task . 
+  subsort BasicTask < Subtask < Task .
+
+--- subtask is a list of basicTasks
+  op nil : -> Subtask [ctor] .
+  op __ : Subtask Subtask -> Subtask [ctor assoc id: nil] .
+
+--- Task is a list of subTasks
+  op emptyTask : -> Task [ctor] .
+  op _::_ : Task Task -> Task [ctor assoc id: emptyTask] .
+
+  op _|_==>_|_duration_difficulty_delay_ : Information Perception DefAction Information Time PosRat Time -> BasicTask [ctor] .
+
+
+--- To avoid warnings we need the following declaration
+--- for technical purposes.  The module RAT introduces
+--- the integers as well, and the Maude complains about
+--- problems with terms such as max(INF, -2)
+  op max : TimeInf Int -> TimeInf [ditto] .
+
+  vars I I2 : Information .
+  var P : Perception .
+  var DACT : DefAction .
+  vars T T1 : Time .
+  var PR : PosRat .
+  var BTL : Subtask .
+  
+--- OPERATOR NUMERATOR 
+  op numerator : Subtask -> PosRat .
+  eq numerator(nil) =  0 .
+  eq numerator((I | P ==> DACT | I2 duration T difficulty PR delay T1) BTL)
+   = T * PR + numerator(BTL) .
+
+--- OPERATOR subtaskDuration TO CALCULATE THE total duration of a
+--- subtask (duration + waiting time of each BT)  
+  op subtaskDuration : Subtask -> Time .   
+  eq subtaskDuration(nil) = 0 .
+  eq subtaskDuration((I | P ==> DACT | I2 duration T difficulty PR delay T1) BTL)
+   =   (T + T1) + subtaskDuration(BTL) .
+
+--- OPERATOR cogLoad TO CALCULATE THE COGNITIVELOAD OF A SUBTASK
+  op cogLoad : Subtask -> PosRat .   *** 0 < cogLoad <= 1
+  eq cogLoad(BTL)
+   = if BTL == nil then 0 else numerator(BTL) / subtaskDuration(BTL) fi .
+
+endtom)
+ 
+--- ----------------------------------------------------
+--- ----------------------------------------------------
+
+*** CLASSES
+
+(tomod CLASSES is
+  including TASK .
+  including INTERFACE .
+  including ASSESSMENT .
+
+  subsort InterfaceId < Oid .
+
+  class WorkingMemory | memory : Memory, 
+                        capacity : NzNat .
+
+  class Interface | task : Object,     
+                    transitions : InterfaceTransitions, 
+                    previousAction : DefAction, 
+                    currentState : InterfaceState .
+endtom)
+
+
+--- ------------------------------------------------------
+--- ------------------------------------------------------
+
+
+(tomod TIMED-OO-COGNITIVE-FRAMEWORK is
+   including CLASSES .
+   including TIME-DOMAIN .
+
+--- VARIABLES
+  vars P1 P2 : Perception .
+  vars INF1 INF2 INF3 : Information .
+  var MEMORY : Memory .
+  vars DACT DACT2 : DefAction .
+  vars ACT ACT1 : Action .
+  var IS : InterfaceState .
+  vars N N1 N2 N3 CAP : Nat .
+  vars N4 N5 : NzNat .
+  var TRANSES : InterfaceTransitions .
+  vars WM TASK GC RANK : Oid .
+  vars I I1 I2 : InterfaceId .
+  vars INFO-SET INFO-SET2 : InfoSet .
+  vars T T1 T2 T3 T4 T5 : Time .
+  vars TI TI2 : TimeInf .
+  vars NZT NZT2 MIN-DELAY : NzTime .    
+  vars OTHER-INTERFACES SYSTEM REST ALL-INTERFACES : Configuration .
+  vars NEC1 NEC2 : NEConfiguration .
+  vars OTHER-BASIC-TASKS BTL SUB-TASK : Subtask .
+  vars OTHER-SUB-TASKS TASK : Task .
+  var R1 : Rat .
+  vars PR PR1 PR2 : PosRat .
+  var OBJECT : Object .
+  vars COG1 COG2 : Cognition .
+  vars CL CL1 CL2 : Rat .
+  var TS : TaskStatus .
+
+
+--- RULES 
+
+
+---  INTERACTING -------------------------
+
+  crl [interacting] :
+      {OTHER-INTERFACES
+       < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS, 
+	       		                       waitTime : T1, 
+		                               cognitiveLoad : CL,
+	      		                       criticalityLevel : PR2,
+			                       status : TS >,
+                          transitions : (P1 -- DACT --> (P2 for time TI2)) ; TRANSES, 
+                          currentState : (P1 for time TI),
+                          previousAction : DACT2 >    
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF1  goal(ACT) INFO-SET),
+	                      capacity : CAP >}
+   =>
+      {idle(OTHER-INTERFACES, NZT)
+       < I : Interface | task : < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then (OTHER-BASIC-TASKS :: OTHER-SUB-TASKS) else OTHER-SUB-TASKS fi),
+                                                waitTime : 0,
+			                        status : (if TS == notStarted then ongoing else TS fi),
+			                        cognitiveLoad : (if OTHER-BASIC-TASKS =/= nil then CL else cogLoad(first(OTHER-SUB-TASKS)) fi) >,  
+                          currentState : (P2 for time TI2), 
+                          previousAction : DACT >
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF2 goal(ACT) INFO-SET) >}
+     in time NZT 
+     if assess(DACT, P1) =/= danger
+        /\ (DACT =/= ACT)            
+	/\ card(MEMORY ; (I |-> INF2 goal(ACT) INFO-SET)) <= CAP    
+        /\ rank(< I : Interface | >, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET)))
+	   == bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET))) .
+
+
+
+---  FORGETTING -------------------------
+*** if performing the highest-priority basic task would go beyond the brain's capacity
+*** one item is removed from working memory (not the goal of what one is
+*** currently trying to do)
+
+*** Two possibilities:
+
+*** 1. forget something related to the current interface
+--- Only applies if there are no memory items stored for other interfaces
+--- Note: we know that none of the items in the memory
+--- are the new element.
+
+  crl [interactingForgetSomethingCurrentInterface] :
+      {OTHER-INTERFACES
+       < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS, 
+	       		                        waitTime : T1, 
+		                                cognitiveLoad : CL,
+	      		                        criticalityLevel : PR2,
+			                        status : TS >,
+                         transitions : (P1 -- DACT --> (P2 for time TI2)) ; TRANSES, 
+                         currentState : (P1 for time TI),
+                         previousAction : DACT2 >    
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF1  goal(ACT) INF3 INFO-SET),
+             	              capacity : CAP >}
+   =>
+      {idle(OTHER-INTERFACES, NZT)
+       < I : Interface | task : < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then (OTHER-BASIC-TASKS :: OTHER-SUB-TASKS) else OTHER-SUB-TASKS fi),
+                                                waitTime : 0,
+			                        cognitiveLoad : (if OTHER-BASIC-TASKS =/= nil then CL else cogLoad(first(OTHER-SUB-TASKS)) fi),
+			                        status : (if TS == notStarted then ongoing else TS fi) >,  
+                                                currentState : (P2 for time TI2), 
+                                                previousAction : DACT >
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF2 goal(ACT) INFO-SET) >}
+     in time NZT 
+     if card(MEMORY) == 0 /\ assess(DACT2, P1) =/= danger
+        /\ (DACT =/= ACT)            
+	/\ card((I |-> INF2 goal(ACT) INF3 INFO-SET)) > CAP    
+        /\ rank(< I : Interface | >, (MEMORY ; (I |-> INF1  goal(ACT) INF3 INFO-SET)))
+	   == bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INF1  goal(ACT) INF3 INFO-SET))) .
+
+
+*** 2. an item remembered for another interface is removed
+
+  crl [interactingForgetSomethingOtherInterface] :
+      {OTHER-INTERFACES
+       < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS, 
+	       		                       waitTime : T1, 
+		                               cognitiveLoad : CL,
+	      		                       criticalityLevel : PR2,
+			                       status : TS >,
+                          transitions : (P1 -- DACT --> (P2 for time TI2)) ; TRANSES, 
+                          currentState : (P1 for time TI),
+                          previousAction : DACT2 >    
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF2  goal(ACT) INFO-SET) ; 
+                                                (I2 |-> INF3 INFO-SET2), 
+                              capacity : CAP >}
+   =>
+      {idle(OTHER-INTERFACES, NZT)
+       < I : Interface | task : < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then (OTHER-BASIC-TASKS :: OTHER-SUB-TASKS) else OTHER-SUB-TASKS fi),
+                                                waitTime : 0,
+			                        status : (if TS == notStarted then ongoing else TS fi),
+			                        cognitiveLoad : (if OTHER-BASIC-TASKS =/= nil then CL else cogLoad(first(OTHER-SUB-TASKS)) fi) >,  
+                          currentState : (P2 for time TI2), 
+                          previousAction : DACT >
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF2 goal(ACT) INFO-SET) ;
+				                (I2 |-> INFO-SET2) >}
+     in time NZT 
+     if assess(DACT2, P1) =/= danger
+        /\ (DACT =/= ACT)            
+	/\ card(MEMORY ; (I |-> INF2 goal(ACT) INFO-SET) ; 
+                         (I2 |-> INF3 INFO-SET2) ) > CAP  
+        /\ card(MEMORY ; (I |-> INF2 goal(ACT) INFO-SET) ;
+	                 (I2 |-> INFO-SET2) ) <= CAP  
+        /\ rank(< I : Interface | >, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET)))
+	   == bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET))) .
+
+
+
+
+*** OPERATOR first
+--- it returns the first subtask of a task, and nil for a empty task.
+  op first : Task -> Subtask .
+  eq first(emptyTask) = nil .   
+  eq first(SUB-TASK :: OTHER-SUB-TASKS) = SUB-TASK .
+ 
+
+
+--- OPERATOR IDLE
+--- it defines what happens when time passes to all the interfaces NOT in execution
+--- Basically three things happen:
+--- 1. 'delay' time of the first basic task of all other interfaces
+---    decreases according to time elapsed.
+--- 2. 'waitTime' of all other interfaces increases with the time elapsed.
+--- 3. The remaining time until the perception expires in all other
+---     interfaces decreases according to elapsed time.
+
+  op idle : Configuration Time -> Configuration [frozen (1)] .
+
+  eq idle(none, T) = none .
+  eq idle(< I : Interface |
+             task : < TASK : Task |
+	               subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT
+		                    difficulty PR delay T2) OTHER-BASIC-TASKS)
+				  :: OTHER-SUB-TASKS,
+	               waitTime : T3 >,
+	     currentState : IS > REST, T)
+  = < I : Interface |
+       task : < TASK : Task |
+                 subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT
+		              difficulty PR delay (T2 monus T)) OTHER-BASIC-TASKS)
+			    :: OTHER-SUB-TASKS,
+	         waitTime : T3 + (T monus T2) >,       *** P: late change
+       currentState : idle(IS, T) > idle(REST, T) .
+
+
+  eq idle(< I : Interface |
+             task : < TASK : Task | subtasks : nil :: OTHER-SUB-TASKS > >  REST, T)
+  = idle(< I : Interface |
+             task : < TASK : Task | subtasks : OTHER-SUB-TASKS > >  REST, T) .
+
+
+--- finished tasks: waitTime stays 0 in this case
+  eq idle(< I : Interface | task : < TASK : Task | subtasks : emptyTask,
+	                                           waitTime : T3 >,
+	                    currentState : IS > REST, T)
+  = < I : Interface | task : < TASK : Task | waitTime : 0 >,     
+                      currentState : idle(IS, T) > idle(REST, T) .
+
+
+--- memory (idle doesn't change memory)
+
+  eq idle(< WM : WorkingMemory | >   REST, T) =  
+     < WM : WorkingMemory | >    idle(REST, T) .
+
+
+--- Case 3:
+  op idle : InterfaceState TimeInf -> InterfaceState .
+  eq idle(P1 for time TI, T) = if T < TI then P1 for time (TI monus T) else expired(P1) fi .
+  eq idle(expired(P1), T) = expired(P1) .
+
+
+
+--- OPERATOR RANK
+*** which enabled interface has the highest priority        
+
+  op rank : NEConfiguration Memory -> PosRat .
+
+  eq rank(< I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT difficulty PR delay T2) BTL) :: OTHER-SUB-TASKS,
+                                                   waitTime : T, 
+                                                   cognitiveLoad : CL,           
+ 	      	                                   criticalityLevel : PR2 > >,
+          (I |-> goal(ACT) INFO-SET) ; MEMORY)
+   = if T2 == 0 then PR2 * CL * (T + 1) else 0 fi .
+ 
+
+  eq rank(< I : Interface |  >,  MEMORY) = 0 [owise] .     
+
+--- OPERATOR BEST RANK       
+  op bestRank : NEConfiguration Memory -> PosRat .
+  eq bestRank(OBJECT, MEMORY) = rank(OBJECT, MEMORY) .
+  eq bestRank(NEC1 NEC2, MEMORY) = max(rank(NEC1, MEMORY), rank(NEC2, MEMORY)) .
+
+
+---  IDLING -------------------------
+
+*** Manages the situation in which the tasks are not
+*** completed but all still have some 'delay' remaining
+*** of their first basic task.  
+
+  crl [tickAllIdling] :
+      {ALL-INTERFACES
+      < WM : WorkingMemory | memory : MEMORY ; (I |-> goal(ACT) INFO-SET) >}
+    =>
+      {idle(ALL-INTERFACES, MIN-DELAY)
+       < WM : WorkingMemory | >} 
+     in time MIN-DELAY
+     if MIN-DELAY := minDelay(ALL-INTERFACES) .
+
+--- Note that MIN-DELAY is a variable of sort
+--- NzTime, so it must be greater than 0 and
+--- different from INF
+
+
+
+--- OPERATOR delay returns the remaining delay of the first basic
+---     task of the task
+  op delay : Object -> TimeInf .
+  eq delay(< I : Interface | task : < TASK : Task | subtasks : (((INF1 | P1 ==> DACT | INF2 duration NZT difficulty PR delay T4) OTHER-BASIC-TASKS)) :: OTHER-SUB-TASKS > >) = T4 .
+
+  eq delay(< I : Interface | task : < TASK : Task | subtasks : emptyTask > >) = INF .
+
+
+  eq delay(< I : Interface | task : < TASK : Task | subtasks : nil :: OTHER-SUB-TASKS > >) 
+   = delay(< I : Interface | task : < TASK : Task | subtasks : OTHER-SUB-TASKS > >) .
+
+--- OPERATOR minDelay returns the minimum of all waiting
+--- time among all first basic tasks of each task.    
+  op minDelay : NEConfiguration -> TimeInf .
+  eq minDelay(OBJECT) = delay(OBJECT) .
+  eq minDelay(NEC1 NEC2) = min(minDelay(NEC1), minDelay(NEC2)) .
+
+
+
+---  CLOSURE -------------------------
+
+  crl [closure] :
+      {OTHER-INTERFACES    
+       < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> ACT | INF2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS,
+	       		                        waitTime : T1, 
+		                                cognitiveLoad : CL,
+	      		                        criticalityLevel : PR2,
+			                        status : TS >,
+                          transitions : (P1 -- DACT --> (P2 for time TI2)) ; TRANSES, 
+                          currentState : (P1 for time TI),
+                          previousAction : DACT2 >
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET INF1 goal(ACT)) >}
+    =>
+      {idle(OTHER-INTERFACES, NZT)
+       < I : Interface | task : < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then (OTHER-BASIC-TASKS :: OTHER-SUB-TASKS) else OTHER-SUB-TASKS fi),    
+                                                waitTime : 0,
+						cognitiveLoad : CL,                           
+						status : completed >,  
+                                   currentState : (P2 for time TI2), 
+                                   previousAction : ACT >
+       < WM : WorkingMemory | memory :  MEMORY ; (I |-> INFO-SET INF2) >}                      
+     in time NZT
+     if rank(< I : Interface | >, (MEMORY ; (I |-> INFO-SET INF1 goal(ACT))))
+	== bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INFO-SET INF1 goal(ACT)))) .
+
+
+
+
+---  DANGER -------------------------
+
+  crl [danger] :
+      {OTHER-INTERFACES    
+       < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | INF2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS, 
+	       		                        waitTime : T1,   
+	      			                criticalityLevel : PR2 >,
+                         transitions : (P1 -- ACT --> (P2 for time TI2)) ; TRANSES, 
+                         previousAction : ACT1,
+                         currentState : (P1 for time TI) >
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET INF1 goal(ACT)) >}
+      =>
+      {idle(OTHER-INTERFACES, NZT)      
+       < I : Interface | task : < TASK : Task | waitTime : 0,
+                                                subtasks : emptyTask,  
+						cognitiveLoad : 0,     
+						status : abandoned >,  
+                         currentState : (if TI2 == INF then P2 else expired(P2) fi),
+		         previousAction : DACT >
+       < WM : WorkingMemory | memory : MEMORY ; (I |-> INF2) >} 
+     in time NZT 
+     if assess(ACT1, P1) == danger
+        /\ rank(< I : Interface | >, (MEMORY ; (I |-> INFO-SET INF1 goal(ACT))))
+	== bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INFO-SET INF1 goal(ACT)))) .
+
+
+
+---  TIMEOUT -------------------------
+--- Interface autonomous action. No involvement of the human side.
+--- There is no attention involved because the machine works alone
+--- without interaction with the human
+
+   rl [timeout] :
+   {REST
+    < I : Interface | transitions : (expired(P1) -- DACT --> IS) ; TRANSES,
+                      currentState : expired(P1) >}
+   =>
+   {REST
+    < I : Interface | currentState : IS, 
+                      previousAction : DACT >} .
+
+
+
+---  COGNITIVE -------------------------
+
+--- Human Autonomous action . No involvement of the interface .
+--- He retrieves an information from STM and put inside it a Cognition (state of
+--- the plan developed by the user)
+
+  crl [cognitive] : 
+  {OTHER-INTERFACES
+   < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | COG2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS,
+	                                    waitTime : T1,
+		                            cognitiveLoad : CL, 
+		                            criticalityLevel : PR2,
+		                            status : TS > >         
+   < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET INF1 goal(ACT)),
+                          capacity : CAP >}
+  =>
+  {idle(OTHER-INTERFACES, NZT)       
+   < I : Interface | task : < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then OTHER-BASIC-TASKS :: OTHER-SUB-TASKS else OTHER-SUB-TASKS fi),   
+			                    cognitiveLoad : (if OTHER-BASIC-TASKS =/= nil then CL else cogLoad(first(OTHER-SUB-TASKS)) fi),
+			                    status : (if TS == notStarted then ongoing else TS fi) > >
+   < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET COG2 goal(ACT)) >}
+  in time NZT 
+  if assess(DACT, P1) =/= danger
+     /\ (DACT =/= ACT)            
+     /\ card(MEMORY ; (I |-> INFO-SET COG2 goal(ACT))) <= CAP
+     /\ rank(< I : Interface | >, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET)))
+	 == bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET))) .
+
+
+---  FORGETTING COGNITION -------------------------
+
+*** 1. Forgetting something related to current interface:
+
+  crl [cognitiveForgetSomethingInCurrentInterface] : 
+  {OTHER-INTERFACES
+   < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | COG2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS,
+	                                    waitTime : T1,
+		                            cognitiveLoad : CL, 
+		                            criticalityLevel : PR2,
+		                            status : TS > >                
+   < WM : WorkingMemory | memory : MEMORY ;   (I |-> INF3 INFO-SET INF1 goal(ACT)),
+                          capacity : CAP >}
+  =>
+  {idle(OTHER-INTERFACES, NZT)       
+   < I : Interface | task : < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then OTHER-BASIC-TASKS :: OTHER-SUB-TASKS else OTHER-SUB-TASKS fi),   
+			                    cognitiveLoad : (if OTHER-BASIC-TASKS =/= nil then CL else cogLoad(first(OTHER-SUB-TASKS)) fi),
+			                    status : (if TS == notStarted then ongoing else TS fi) > >
+   < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET COG2 goal(ACT)) >}
+  in time NZT 
+  if card(I |-> INF3 INFO-SET COG2 goal(ACT)) > CAP
+      /\ card(MEMORY) == 0 
+      /\ rank(< I : Interface | >, (MEMORY ; (I |-> INF1  goal(ACT) INF3 INFO-SET)))
+	   == bestRank((< I : Interface | >) OTHER-INTERFACES, (MEMORY ; (I |-> INF1  goal(ACT) INF3 INFO-SET))) .
+
+
+
+
+*** 2. Forgetting something in the other interface:
+
+  crl [cognitiveForgetSomethingOtherInterface] : 
+  {OTHER-INTERFACES
+   < I : Interface | task : < TASK : Task | subtasks : ((INF1 | P1 ==> DACT | COG2 duration NZT difficulty PR delay 0) OTHER-BASIC-TASKS) :: OTHER-SUB-TASKS,
+	                                    waitTime : T1,
+		                            cognitiveLoad : CL, 
+		                            criticalityLevel : PR2,
+		                            status : TS > >      
+   < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET INF1 goal(ACT)); 
+                                            (I2 |-> INF3 INFO-SET2),
+                          capacity : CAP >}
+  =>
+  {idle(OTHER-INTERFACES, NZT)       
+   < I : Interface | task :  < TASK : Task | subtasks : (if OTHER-BASIC-TASKS =/= nil then OTHER-BASIC-TASKS :: OTHER-SUB-TASKS else OTHER-SUB-TASKS fi),   
+			                     cognitiveLoad : (if OTHER-BASIC-TASKS =/= nil then CL else cogLoad(first(OTHER-SUB-TASKS)) fi),
+			                     status : (if TS == notStarted then ongoing else TS fi) > >
+   < WM : WorkingMemory | memory : MEMORY ; (I |-> INFO-SET COG2 goal(ACT)); 
+                                            (I2 |-> INFO-SET2) >}
+  in time NZT 
+  if card(MEMORY ; (I |-> INFO-SET COG2 goal(ACT)) ; (I2 |-> INF3 INFO-SET2)) > CAP
+     /\ rank(< I : Interface | >, (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET) ; 
+                                            (I2 |-> INF3 INFO-SET2)))
+	   == bestRank((< I : Interface | >) OTHER-INTERFACES,
+		       (MEMORY ; (I |-> INF1  goal(ACT) INFO-SET) ; 
+                                 (I2 |-> INF3 INFO-SET2))) .
+
+
+
+
+*** OPERATOR initializeCognLoad initializes the cognitive load attributes.
+
+  op initializeCognLoad : Configuration -> Configuration [frozen (1)] .
+  eq initializeCognLoad(none) = none .
+  eq initializeCognLoad(< I : Interface | task : < TASK : Task | subtasks : SUB-TASK :: OTHER-SUB-TASKS,
+						                 cognitiveLoad : CL > >    REST)
+   = < I : Interface | task : < TASK : Task | cognitiveLoad : cogLoad(SUB-TASK) > >
+     initializeCognLoad(REST) .
+
+*** For the absurd case when a task has no basicTasks:
+  eq initializeCognLoad(< I : Interface | task : < TASK : Task | subtasks : emptyTask,
+						                 cognitiveLoad : CL > >    REST)
+   = < I : Interface | task : < TASK : Task | cognitiveLoad : 0 > >
+     initializeCognLoad(REST) .
+
+  eq initializeCognLoad(< WM : WorkingMemory | >  REST)
+   = < WM : WorkingMemory | >  initializeCognLoad(REST) .
+
+endtom)
+
+
+
