@@ -1,0 +1,147 @@
+--- "Choosing to interleave: human error and information access cost" Jonathan Back, Anna L. Cox, Duncan P. Brumby
+--- Users have to set two infusion pumps, inserting VBTI and TIME in each infusion pump. 
+--- The prescription form from where they have to retrieve information could be 
+--- close to the infusion pumps (Low-IAC) or distant from the infusion pumps (High-IAC).
+
+--- It has been showed that in the High-IAC case users memorize more information about one pump per time (VTBI and TIME of IP1 or IP2)
+--- because remembering values associated with ONE pump allows meaningful chunking. In the Low-IAC case, instead, users memorize an information
+--- per time and then there is more interleaving. 
+--- In High-IAC users forget fewer times to open the roller clamp respect the Low-IAC case.
+
+--- THIS SPEC MODELS THE LOW-IAC CASE
+
+
+in CogFram5.maude
+
+(omod TEST-NEW-VERSION is
+  including TIMED-OO-COGNITIVE-FRAMEWORK .
+  including NAT-TIME-DOMAIN-WITH-INF .  
+
+--- PUMP1
+  op pump1 : -> InterfaceId [ctor] .
+
+  ops wm settingPump1 : -> Oid [ctor] .
+
+  ops prescriptionFormVtbiP1 setVTBIP1 prescriptionFormTimeP1 setTimeP1 newInterfaceStateP1 clampP1 infusionReadyP1 : -> Perception [ctor] .
+
+  ops type300 type3 openClampP1 startInfusionP1 : -> Action [ctor] . 
+
+  ops vtbi300 time3 : -> Cognition [ctor] .
+
+  op clampOpeningP1 : -> BasicInfo [ctor] .
+
+--- PUMP2
+  op pump2 : -> InterfaceId [ctor] .
+
+  op settingPump2 : -> Oid [ctor] .
+
+  ops prescriptionFormVtbiP2 setVTBIP2 prescriptionFormTimeP2 setTimeP2 newInterfaceStateP2 clampP2 infusionReadyP2 : -> Perception [ctor] .
+
+  ops type200 type4 openClampP2 startInfusionP2 : -> Action [ctor] .
+
+  ops vtbi200 time4 : -> Cognition [ctor] .
+
+  op clampOpeningP2 : -> BasicInfo [ctor] .
+
+
+
+  op initState1 : -> Configuration .
+
+  eq initState1 = initializeCognLoad(
+    < pump1 : Interface | task : < settingPump1 : Task | subtasks : ((noInfo | prescriptionFormVtbiP1 ==> noAction | vtbi300 duration 1 difficulty 2/10 delay 0)
+                                                                     (vtbi300 | setVTBIP1 ==> type300 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                    ((noInfo | prescriptionFormTimeP1 ==> noAction | time3 duration 1 difficulty 2/10 delay 0)
+                                                                     (time3 | setTimeP1 ==> type3 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                    ((clampOpeningP1 | clampP1 ==> openClampP1 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                    ((noInfo | infusionReadyP1 ==> startInfusionP1 | noInfo duration 1 difficulty 2/10 delay 0)) ,
+                                                         waitTime : 0,
+                                                         cognitiveLoad : 0,
+                                                         criticalityLevel : 6/10,
+                                                         status : notStarted >,
+                          transitions : (setVTBIP1 -- type300 --> setTimeP1) ;
+                                        (setTimeP1 -- type3 --> clampP1) ;
+                                        (clampP1 -- openClampP1 --> infusionReadyP1) ;
+                                        (infusionReadyP1 -- startInfusionP1 --> newInterfaceStateP1),
+                          previousAction : noAction,
+                          currentState : setVTBIP1 >
+
+  < pump2 : Interface | task : < settingPump2 : Task | subtasks : ((noInfo | prescriptionFormVtbiP2 ==> noAction | vtbi200 duration 1 difficulty 2/10 delay 0)
+                                                                   (vtbi200 | setVTBIP2 ==> type200 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                  ((noInfo | prescriptionFormTimeP2 ==> noAction | time4 duration 1 difficulty 2/10 delay 0)
+                                                                   (time4 | setTimeP2 ==> type4 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                  ((clampOpeningP2 | clampP2 ==> openClampP2 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                  ((noInfo | infusionReadyP2 ==> startInfusionP2 | noInfo duration 1 difficulty 2/10 delay 0)),
+                                                       waitTime : 0,
+                                                       cognitiveLoad : 0,
+                                                       criticalityLevel : 6/10,
+                                                       status : notStarted >,
+                        transitions : (setVTBIP2 -- type200 --> setTimeP2) ;
+                                      (setTimeP2 -- type4 --> clampP2) ;
+                                      (clampP2 -- openClampP2 --> infusionReadyP2) ;
+                                      (infusionReadyP2 -- startInfusionP2 --> newInterfaceStateP2),
+                        previousAction : noAction,
+                        currentState : setVTBIP2 >
+
+  < wm : WorkingMemory | memory : (pump1 |-> goal(startInfusionP1) clampOpeningP1) ; (pump2 |-> goal(startInfusionP2) clampOpeningP2),
+                         capacity : 5 >
+
+
+) .
+
+
+  op initState2 : -> Configuration .
+
+  eq initState2 = initializeCognLoad(
+    < pump1 : Interface | task : < settingPump1 : Task | subtasks : ((noInfo | prescriptionFormVtbiP1 ==> noAction | vtbi300 duration 1 difficulty 2/10 delay 0)
+                                                                     (vtbi300 | setVTBIP1 ==> type300 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                    ((noInfo | prescriptionFormTimeP1 ==> noAction | time3 duration 1 difficulty 2/10 delay 0)
+                                                                     (time3 | setTimeP1 ==> type3 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                    ((clampOpeningP1 | clampP1 ==> openClampP1 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                    ((noInfo | infusionReadyP1 ==> startInfusionP1 | noInfo duration 1 difficulty 2/10 delay 0)) ,
+                                                         waitTime : 0,
+                                                         cognitiveLoad : 0,
+                                                         criticalityLevel : 6/10,
+                                                         status : notStarted >,
+                          transitions : (setVTBIP1 -- type300 --> setTimeP1) ;
+                                        (setTimeP1 -- type3 --> clampP1) ;
+                                        (clampP1 -- openClampP1 --> infusionReadyP1) ;
+                                        (infusionReadyP1 -- startInfusionP1 --> newInterfaceStateP1),
+                          previousAction : noAction,
+                          currentState : setVTBIP1 >
+
+  < pump2 : Interface | task : < settingPump2 : Task | subtasks : ((noInfo | prescriptionFormVtbiP2 ==> noAction | vtbi200 duration 1 difficulty 2/10 delay 0)
+                                                                   (vtbi200 | setVTBIP2 ==> type200 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                  ((noInfo | prescriptionFormTimeP2 ==> noAction | time4 duration 1 difficulty 2/10 delay 0)
+                                                                   (time4 | setTimeP2 ==> type4 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                  ((clampOpeningP2 | clampP2 ==> openClampP2 | noInfo duration 1 difficulty 2/10 delay 0)) ::
+                                                                  ((noInfo | infusionReadyP2 ==> startInfusionP2 | noInfo duration 1 difficulty 2/10 delay 0)),
+                                                       waitTime : 0,
+                                                       cognitiveLoad : 0,
+                                                       criticalityLevel : 6/10,
+                                                       status : notStarted >,
+                        transitions : (setVTBIP2 -- type200 --> setTimeP2) ;
+                                      (setTimeP2 -- type4 --> clampP2) ;
+                                      (clampP2 -- openClampP2 --> infusionReadyP2) ;
+                                      (infusionReadyP2 -- startInfusionP2 --> newInterfaceStateP2),
+                        previousAction : noAction,
+                        currentState : setVTBIP2 >
+
+  < wm : WorkingMemory | memory : (pump1 |-> goal(startInfusionP1) clampOpeningP1) ; (pump2 |-> goal(startInfusionP2) clampOpeningP2),
+                         capacity : 6 >
+
+
+) .
+
+
+endom) 
+
+
+(trew {initState2} in time < 20 .)
+
+(utsearch {initState1} =>! {< I:InterfaceId : Interface | task : < T:Oid : Task | status : TS:TaskStatus, AS:AttributeSet > > REST:Configuration}
+                            such that TS:TaskStatus =/= completed .)
+
+
+
+(utsearch {initState2} =>! {< I:InterfaceId : Interface | task : < T:Oid : Task | status : TS:TaskStatus, AS:AttributeSet > > REST:Configuration}
+                            such that TS:TaskStatus =/= completed .)
